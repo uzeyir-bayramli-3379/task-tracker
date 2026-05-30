@@ -184,6 +184,22 @@
 
   .empty { padding: 28px 4px; font-size: 18px; color: var(--ink-soft); }
 
+  .confirm-btns { display: flex; gap: 6px; flex: 0 0 auto; align-items: center; }
+  .confirm-yes, .confirm-no {
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+    font-size: 17px;
+    padding: 3px 11px;
+    cursor: pointer;
+    border: 2px solid;
+    background: transparent;
+    border-radius: 255px 8px 225px 8px / 8px 225px 8px 255px;
+    transition: transform .08s ease;
+  }
+  .confirm-yes:active, .confirm-no:active { transform: scale(.94); }
+  .confirm-yes { color: #c0392b; border-color: #c0392b; }
+  .confirm-no  { color: var(--ink-soft); border-color: #c7c4b8; }
+
   /* "completed" separator label */
   .group-sep {
     list-style: none;
@@ -276,7 +292,8 @@ function load() {
 // Save the current tasks array to the browser.
 function save() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(tasks));
+    const clean = tasks.map(({ confirming, ...rest }) => rest);
+    localStorage.setItem(STORE_KEY, JSON.stringify(clean));
   } catch (e) {
     /* ignore — app still works for this session, just won't persist */
   }
@@ -381,9 +398,14 @@ function taskRowHTML(t) {
         '</span>' +
       '</div>' +
       (t.done ? '<span class="stamp">COMPLETE</span>' : '') +
-      '<button class="trash-btn" data-action="delete" data-id="' + t.id + '" title="delete">' +
-        '<svg viewBox="0 0 24 24"><path d="M4 6 H20 M9 6 V4 H15 V6 M6 6 L7 20 H17 L18 6" fill="none" stroke="#2b2b28" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
-      '</button>' +
+      (t.confirming
+        ? '<div class="confirm-btns">' +
+            '<button class="confirm-no"  data-action="cancel-delete" data-id="' + t.id + '">no</button>' +
+            '<button class="confirm-yes" data-action="confirm-delete" data-id="' + t.id + '">yes</button>' +
+          '</div>'
+        : '<button class="trash-btn" data-action="delete" data-id="' + t.id + '" title="delete">' +
+            '<svg viewBox="0 0 24 24"><path d="M4 6 H20 M9 6 V4 H15 V6 M6 6 L7 20 H17 L18 6" fill="none" stroke="#2b2b28" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+          '</button>') +
       '<button class="checkbox sketch" data-action="toggle" data-id="' + t.id + '" style="' + (t.done ? 'border-color:#3f8f5b' : '') + '">' +
         '<svg viewBox="0 0 24 24">' + check + '</svg>' +
       '</button>' +
@@ -433,7 +455,20 @@ listEl.addEventListener('click', (e) => {
   if (!btn) return;
   const id = btn.dataset.id;
   if (btn.dataset.action === 'toggle') toggleTask(id);
-  if (btn.dataset.action === 'delete') deleteTask(id);
+  if (btn.dataset.action === 'delete') {
+    const task = tasks.find((t) => t.id === id);
+    if (task && !task.done) {
+      task.confirming = true;
+      render();
+    } else {
+      deleteTask(id);
+    }
+  }
+  if (btn.dataset.action === 'confirm-delete') deleteTask(id);
+  if (btn.dataset.action === 'cancel-delete') {
+    const task = tasks.find((t) => t.id === id);
+    if (task) { task.confirming = false; render(); }
+  }
 });
 
 // live ETA preview while picking a date
