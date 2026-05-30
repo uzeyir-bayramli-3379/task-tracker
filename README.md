@@ -4,6 +4,8 @@ A simple, lightweight task tracker built as a single HTML page. Add tasks, mark 
 
 🔗 **Live demo:** [task-tracker-navy-five-21.vercel.app](https://task-tracker-navy-five-21.vercel.app)
 
+Deployed on Vercel.
+
 ## Features
 
 - Add new tasks quickly
