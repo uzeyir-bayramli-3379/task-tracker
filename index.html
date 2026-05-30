@@ -47,13 +47,13 @@
     border-radius: 255px 14px 225px 16px / 16px 225px 18px 255px;
   }
 
-  /* The whole paper sheet: sidebar | divider | list */
+  /* The whole paper sheet: sidebar | divider | tasks | divider | recurring */
   .sheet {
-    width: min(1000px, 100%);
+    width: min(1280px, 100%);
     min-height: 620px;
     background: var(--paper);
     display: grid;
-    grid-template-columns: 280px 8px 1fr;
+    grid-template-columns: 280px 8px 1fr 8px 270px;
     box-shadow: 7px 9px 0 rgba(43,43,40,0.10);
     overflow: hidden;
   }
@@ -213,11 +213,145 @@
     padding-bottom: 2px;
   }
 
+  /* ---- RECURRING pane ---- */
+  .rec-pane { padding: 30px 22px; display: flex; flex-direction: column; }
+
+  .rec-form { margin-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* custom dropdown */
+  .ink-drop { position: relative; flex: 1; }
+
+  .ink-drop-trigger {
+    font-family: 'Patrick Hand', cursive;
+    font-size: 16px;
+    color: var(--ink);
+    background: transparent;
+    border: none;
+    border-bottom: 2.2px dashed #c7c4b8;
+    padding: 3px 2px 5px;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    transition: border-color .12s ease, border-style .12s ease;
+  }
+  .ink-drop.open .ink-drop-trigger {
+    border-bottom-style: solid;
+    border-bottom-color: var(--ink);
+  }
+
+  .drop-caret {
+    font-size: 11px;
+    flex-shrink: 0;
+    transition: transform .15s ease;
+    color: var(--ink-soft);
+  }
+  .ink-drop.open .drop-caret { transform: rotate(180deg); }
+
+  .ink-drop-menu {
+    position: absolute;
+    top: calc(100% + 5px);
+    left: -6px;
+    min-width: calc(100% + 12px);
+    background: var(--paper);
+    list-style: none;
+    margin: 0;
+    padding: 5px 0;
+    z-index: 100;
+    display: none;
+    border: 2.2px solid var(--ink);
+    border-radius: 4px 18px 4px 18px / 18px 4px 18px 4px;
+    box-shadow: 3px 4px 0 rgba(43,43,40,0.12);
+  }
+  .ink-drop.open .ink-drop-menu { display: block; }
+
+  .ink-drop-menu li { margin: 0; padding: 0; }
+  .ink-drop-menu button {
+    font-family: 'Patrick Hand', cursive;
+    font-size: 16px;
+    color: var(--ink);
+    background: transparent;
+    border: none;
+    width: 100%;
+    text-align: left;
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: background .1s ease;
+  }
+  .ink-drop-menu button:hover { background: rgba(43,43,40,0.07); }
+  .ink-drop-menu button.active {
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+  }
+
+  .rec-selects { display: flex; gap: 10px; }
+
+  .rec-list { list-style: none; margin: 16px 0 0; padding: 0; }
+
+  .rec-task {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 2px;
+    border-bottom: 2px dotted #ddd9cc;
+  }
+  .rec-task:last-child { border-bottom: none; }
+
+  .rec-body { flex: 1; min-width: 0; }
+  .rec-name { font-size: 18px; line-height: 1.2; }
+
+  .rec-badge {
+    display: inline-block;
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+    font-size: 13px;
+    padding: 1px 7px;
+    border: 1.8px solid;
+    border-radius: 255px 6px 225px 6px / 6px 225px 6px 255px;
+    letter-spacing: .4px;
+    margin-top: 2px;
+  }
+  .rec-badge.due       { color: var(--due);  border-color: var(--due); }
+  .rec-badge.done-t    { color: var(--done); border-color: var(--done); }
+  .rec-badge.not-today { color: #b4b1a6;     border-color: #d5d2c9; }
+
+  .rec-tick {
+    flex: 0 0 auto;
+    width: 28px; height: 28px;
+    padding: 0;
+    background: transparent;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    transition: transform .1s ease;
+  }
+  .rec-tick:hover:not(:disabled) { transform: scale(1.1) rotate(-2deg); }
+  .rec-tick:disabled { opacity: .3; cursor: default; }
+  .rec-tick svg { width: 20px; height: 20px; }
+
+  .rec-trash {
+    flex: 0 0 auto;
+    width: 24px; height: 24px;
+    padding: 2px;
+    background: transparent; border: none;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .15s ease, transform .1s ease;
+    display: grid; place-items: center;
+  }
+  .rec-trash svg { width: 15px; height: 15px; }
+  .rec-task:hover .rec-trash { opacity: .4; }
+  .rec-trash:hover { opacity: 1 !important; transform: scale(1.1) rotate(-3deg); }
+
   /* Stack into one column on narrow screens / phones */
-  @media (max-width: 700px) {
+  @media (max-width: 900px) {
     .sheet { grid-template-columns: 1fr; min-height: 0; }
     .divider { display: none; }
     .sidebar { border-bottom: 2.4px solid var(--ink); }
+    .rec-pane { border-top: 2.4px solid var(--ink); }
   }
 </style>
 </head>
@@ -252,13 +386,60 @@
         </svg>
       </div>
 
-      <!-- RIGHT: the list -->
+      <!-- MIDDLE: task list -->
       <section class="list-pane">
         <header class="list-head">
           <h2 class="pane-title">tasks</h2>
           <span class="counts" id="counts"></span>
         </header>
         <ul class="task-list" id="task-list"></ul>
+      </section>
+
+      <!-- DIVIDER 2 -->
+      <div class="divider" aria-hidden="true">
+        <svg viewBox="0 0 8 600" preserveAspectRatio="none">
+          <path d="M4 4 C 5 150, 3 300, 5 450 S 3 560, 4 596"
+                fill="none" stroke="#2b2b28" stroke-width="2.4" stroke-linecap="round" />
+        </svg>
+      </div>
+
+      <!-- RIGHT: recurring tasks -->
+      <section class="rec-pane">
+        <h2 class="pane-title">recurring</h2>
+        <form class="rec-form" id="rec-form">
+          <input class="ink-input" id="rec-name" placeholder="habit name…" autocomplete="off" />
+          <div class="rec-selects">
+            <!-- frequency picker -->
+            <div class="ink-drop" id="freq-drop">
+              <button class="ink-drop-trigger" type="button" data-value="daily">
+                daily <span class="drop-caret">▾</span>
+              </button>
+              <ul class="ink-drop-menu">
+                <li><button type="button" data-dropval="daily"    class="active">daily</button></li>
+                <li><button type="button" data-dropval="weekdays"         >weekdays</button></li>
+                <li><button type="button" data-dropval="weekly"           >weekly</button></li>
+                <li><button type="button" data-dropval="monthly"          >monthly</button></li>
+              </ul>
+            </div>
+            <!-- day-of-week picker (weekly only) -->
+            <div class="ink-drop" id="day-drop" style="display:none">
+              <button class="ink-drop-trigger" type="button" data-value="1">
+                monday <span class="drop-caret">▾</span>
+              </button>
+              <ul class="ink-drop-menu">
+                <li><button type="button" data-dropval="1" class="active">monday</button></li>
+                <li><button type="button" data-dropval="2"               >tuesday</button></li>
+                <li><button type="button" data-dropval="3"               >wednesday</button></li>
+                <li><button type="button" data-dropval="4"               >thursday</button></li>
+                <li><button type="button" data-dropval="5"               >friday</button></li>
+                <li><button type="button" data-dropval="6"               >saturday</button></li>
+                <li><button type="button" data-dropval="0"               >sunday</button></li>
+              </ul>
+            </div>
+          </div>
+          <button class="add-btn sketch" type="submit" style="font-size:18px;padding:7px 13px">+ add</button>
+        </form>
+        <ul class="rec-list" id="rec-list"></ul>
       </section>
 
     </div>
@@ -493,8 +674,168 @@ document.getElementById('add-form').addEventListener('submit', (e) => {
   nameInput.focus();
 });
 
-// first paint
+// ---- recurring tasks -----------------------------------------------
+const REC_KEY = 'task-tracker.recurring';
+
+function loadRec() {
+  try { return JSON.parse(localStorage.getItem(REC_KEY)) || []; }
+  catch (e) { return []; }
+}
+function saveRec() {
+  try { localStorage.setItem(REC_KEY, JSON.stringify(recurring)); }
+  catch (e) {}
+}
+
+let recurring = loadRec();
+
+const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+
+function todayISO() {
+  const n = new Date();
+  return n.getFullYear() + '-' + pad(n.getMonth() + 1) + '-' + pad(n.getDate());
+}
+
+function isRecDueToday(r) {
+  const today = todayISO();
+  const dow   = new Date().getDay();
+  if (r.freq === 'daily')    return !r.lastDone || r.lastDone < today;
+  if (r.freq === 'weekdays') return dow >= 1 && dow <= 5 && (!r.lastDone || r.lastDone < today);
+  if (r.freq === 'weekly')   return dow === r.weekday && (!r.lastDone || r.lastDone < today);
+  if (r.freq === 'monthly') {
+    if (!r.lastDone) return true;
+    const ld = new Date(r.lastDone + 'T00:00:00'), td = new Date();
+    return ld.getFullYear() !== td.getFullYear() || ld.getMonth() !== td.getMonth();
+  }
+  return false;
+}
+
+function recLabel(r) {
+  return r.freq === 'weekly' ? 'weekly · ' + DAYS[r.weekday].slice(0, 3) : r.freq;
+}
+
+function addRecurring(name, freq, weekday) {
+  recurring.push({
+    id: Date.now() + '' + Math.floor(Math.random() * 1000),
+    name, freq,
+    weekday: freq === 'weekly' ? weekday : 0,
+    lastDone: '',
+  });
+  saveRec(); renderRec();
+}
+
+function tickRecurring(id) {
+  const r = recurring.find((r) => r.id === id);
+  if (!r) return;
+  r.lastDone = todayISO();
+  saveRec(); renderRec();
+}
+
+function deleteRecurring(id) {
+  recurring = recurring.filter((r) => r.id !== id);
+  saveRec(); renderRec();
+}
+
+const recListEl = document.getElementById('rec-list');
+
+function recRowHTML(r) {
+  const due       = isRecDueToday(r);
+  const doneToday = r.lastDone === todayISO();
+  const badgeClass = due ? 'due' : doneToday ? 'done-t' : 'not-today';
+  const badgeText  = due ? recLabel(r) + ' · due' : doneToday ? 'done today' : recLabel(r);
+  const checkPath  = doneToday
+    ? '<path d="M4 13 C 7 16, 9 18, 10 19 C 13 13, 17 7, 21 4" fill="none" stroke="#3f8f5b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
+    : '';
+
+  return (
+    '<li class="rec-task">' +
+      '<div class="rec-body">' +
+        '<div class="rec-name">' + escapeHtml(r.name) + '</div>' +
+        '<span class="rec-badge ' + badgeClass + '">' + escapeHtml(badgeText) + '</span>' +
+      '</div>' +
+      '<button class="rec-trash" data-raction="delete" data-rid="' + r.id + '" title="delete">' +
+        '<svg viewBox="0 0 24 24"><path d="M4 6 H20 M9 6 V4 H15 V6 M6 6 L7 20 H17 L18 6" fill="none" stroke="#2b2b28" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      '</button>' +
+      '<button class="rec-tick sketch" data-raction="tick" data-rid="' + r.id + '"' + (doneToday ? ' disabled' : '') + '>' +
+        '<svg viewBox="0 0 24 24">' + checkPath + '</svg>' +
+      '</button>' +
+    '</li>'
+  );
+}
+
+function renderRec() {
+  if (recurring.length === 0) {
+    recListEl.innerHTML = '<li class="empty" style="font-size:16px">no habits yet.</li>';
+    return;
+  }
+  const sorted = [...recurring].sort((a, b) => {
+    const ad = isRecDueToday(a), bd = isRecDueToday(b);
+    if (ad !== bd) return ad ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  recListEl.innerHTML = sorted.map(recRowHTML).join('');
+}
+
+recListEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-raction]');
+  if (!btn) return;
+  const id = btn.dataset.rid;
+  if (btn.dataset.raction === 'tick')   tickRecurring(id);
+  if (btn.dataset.raction === 'delete') deleteRecurring(id);
+});
+
+// ---- custom dropdowns ---------------------------------------------
+function initDrop(dropEl, onChange) {
+  const trigger = dropEl.querySelector('.ink-drop-trigger');
+  const opts    = dropEl.querySelectorAll('.ink-drop-menu button');
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.ink-drop.open').forEach((d) => {
+      if (d !== dropEl) d.classList.remove('open');
+    });
+    dropEl.classList.toggle('open');
+  });
+
+  opts.forEach((opt) => {
+    opt.addEventListener('click', () => {
+      const val  = opt.dataset.dropval;
+      const text = opt.textContent.trim();
+      trigger.dataset.value = val;
+      // update label text node (first child), keep the caret span
+      trigger.firstChild.textContent = text + ' ';
+      opts.forEach((o) => o.classList.remove('active'));
+      opt.classList.add('active');
+      dropEl.classList.remove('open');
+      if (onChange) onChange(val);
+    });
+  });
+}
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.ink-drop.open').forEach((d) => d.classList.remove('open'));
+});
+
+const freqDrop = document.getElementById('freq-drop');
+const dayDrop  = document.getElementById('day-drop');
+
+initDrop(freqDrop, (val) => {
+  dayDrop.style.display = val === 'weekly' ? '' : 'none';
+});
+initDrop(dayDrop);
+
+document.getElementById('rec-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = document.getElementById('rec-name').value.trim();
+  if (!name) { document.getElementById('rec-name').focus(); return; }
+  const freq    = freqDrop.querySelector('.ink-drop-trigger').dataset.value;
+  const weekday = parseInt(dayDrop.querySelector('.ink-drop-trigger').dataset.value, 10);
+  addRecurring(name, freq, weekday);
+  document.getElementById('rec-name').value = '';
+});
+
+// ---- first paint ---------------------------------------------------
 render();
+renderRec();
 </script>
 </body>
 </html>
