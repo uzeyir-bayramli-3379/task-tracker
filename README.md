@@ -50,6 +50,10 @@ That's it — no server or install required.
 
 The app is deployed on [Vercel](https://vercel.com). To deploy your own copy, import the repository into Vercel and it will serve `index.html` automatically as a static site.
 
+## NOTE
+
+FURTHER CHANGES TO THE APP AND README FILE WILL BE MADE ACCORDING TO MY INTERESTS
+
 ## License
 
 Free to use and modify.
