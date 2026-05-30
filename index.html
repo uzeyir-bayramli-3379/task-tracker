@@ -346,6 +346,112 @@
   .rec-task:hover .rec-trash { opacity: .4; }
   .rec-trash:hover { opacity: 1 !important; transform: scale(1.1) rotate(-3deg); }
 
+  /* ---- view toggle (list / week) ---- */
+  .view-toggle {
+    display: flex;
+    border: 2.2px solid var(--ink);
+    border-radius: 255px 8px 225px 8px / 8px 225px 8px 255px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .vt-btn {
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+    font-size: 16px;
+    padding: 3px 13px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--ink-soft);
+    transition: background .12s ease, color .12s ease;
+  }
+  .vt-btn.active { background: var(--ink); color: var(--paper); }
+
+  /* ---- week view ---- */
+  .week-view { display: flex; flex-direction: column; flex: 1; }
+
+  .week-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .wk-range {
+    font-family: 'Caveat', cursive;
+    font-size: 18px;
+    color: var(--ink-soft);
+  }
+  .wk-nav-btn {
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+    font-size: 22px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--ink);
+    padding: 2px 8px;
+    transition: transform .1s ease;
+  }
+  .wk-nav-btn:hover { transform: scale(1.25); }
+
+  .week-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    align-items: start;
+  }
+
+  .week-day { display: flex; flex-direction: column; }
+
+  .week-day-hdr {
+    text-align: center;
+    padding: 4px 2px 6px;
+    border-bottom: 2px solid #ddd9cc;
+    margin-bottom: 6px;
+  }
+  .wd-name {
+    display: block;
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--ink-soft);
+    letter-spacing: .5px;
+  }
+  .wd-num {
+    display: block;
+    font-family: 'Caveat', cursive;
+    font-weight: 700;
+    font-size: 28px;
+    color: var(--ink);
+    line-height: 1;
+  }
+  .week-day.today .week-day-hdr { border-bottom-color: var(--due); }
+  .week-day.today .wd-name,
+  .week-day.today .wd-num { color: var(--due); }
+  .week-day.past .wd-name,
+  .week-day.past .wd-num { color: #c2bfb4; }
+
+  .week-task {
+    font-family: 'Patrick Hand', cursive;
+    font-size: 13px;
+    line-height: 1.3;
+    padding: 4px 6px;
+    margin-bottom: 4px;
+    border: 1.6px solid #ddd9cc;
+    border-radius: 4px 12px 4px 12px / 12px 4px 12px 4px;
+    cursor: pointer;
+    word-break: break-word;
+    transition: background .1s ease;
+  }
+  .week-task:hover { background: rgba(43,43,40,0.06); }
+  .week-task.done {
+    color: var(--ink-soft);
+    border-color: #e8e5dc;
+    text-decoration: line-through;
+    text-decoration-color: var(--done);
+  }
+  .week-empty { font-size: 12px; color: #d0cdc4; text-align: center; padding: 4px 0; }
+
   /* Stack into one column on narrow screens / phones */
   @media (max-width: 900px) {
     .sheet { grid-template-columns: 1fr; min-height: 0; }
@@ -386,13 +492,27 @@
         </svg>
       </div>
 
-      <!-- MIDDLE: task list -->
+      <!-- MIDDLE: task list / week view -->
       <section class="list-pane">
         <header class="list-head">
           <h2 class="pane-title">tasks</h2>
-          <span class="counts" id="counts"></span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="counts" id="counts"></span>
+            <div class="view-toggle">
+              <button class="vt-btn active" id="btn-list" type="button">list</button>
+              <button class="vt-btn"        id="btn-week" type="button">week</button>
+            </div>
+          </div>
         </header>
         <ul class="task-list" id="task-list"></ul>
+        <div class="week-view" id="week-view" style="display:none">
+          <div class="week-nav">
+            <button class="wk-nav-btn" id="wk-prev" type="button">←</button>
+            <span class="wk-range" id="wk-range"></span>
+            <button class="wk-nav-btn" id="wk-next" type="button">→</button>
+          </div>
+          <div class="week-grid" id="week-grid"></div>
+        </div>
       </section>
 
       <!-- DIVIDER 2 -->
@@ -625,6 +745,8 @@ function render() {
   countsEl.innerHTML =
     '<b>' + active.length + '</b> active <span class="dot">·</span> ' +
     '<b style="color:#3f8f5b">' + done.length + '</b> done';
+
+  if (typeof currentView !== 'undefined' && currentView === 'week') renderWeek();
 }
 
 // ---- wiring up the buttons & form ---------------------------------
@@ -832,6 +954,88 @@ document.getElementById('rec-form').addEventListener('submit', (e) => {
   addRecurring(name, freq, weekday);
   document.getElementById('rec-name').value = '';
 });
+
+// ---- week view -----------------------------------------------------
+let currentView = 'list';
+let weekOffset  = 0;
+
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function getWeekDays(offset) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const dow    = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + offset * 7);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return d;
+  });
+}
+
+function dayISO(d) {
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+
+function renderWeek() {
+  const days    = getWeekDays(weekOffset);
+  const today   = todayISO();
+  const gridEl  = document.getElementById('week-grid');
+  const rangeEl = document.getElementById('wk-range');
+
+  const first = days[0], last = days[6];
+  rangeEl.textContent =
+    pad(first.getDate()) + '/' + pad(first.getMonth() + 1) +
+    ' – ' +
+    pad(last.getDate()) + '/' + pad(last.getMonth() + 1);
+
+  gridEl.innerHTML = days.map((day, i) => {
+    const iso      = dayISO(day);
+    const isToday  = iso === today;
+    const isPast   = iso < today;
+    const dayTasks = tasks
+      .filter((t) => t.deadline === iso)
+      .sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0));
+
+    const cards = dayTasks.map((t) =>
+      '<div class="week-task' + (t.done ? ' done' : '') + '" data-wk-id="' + t.id + '">' +
+        escapeHtml(t.name) +
+      '</div>'
+    ).join('') || '<span class="week-empty">—</span>';
+
+    return (
+      '<div class="week-day' + (isToday ? ' today' : isPast ? ' past' : '') + '">' +
+        '<div class="week-day-hdr">' +
+          '<span class="wd-name">' + DAY_NAMES[i] + '</span>' +
+          '<span class="wd-num">'  + day.getDate() + '</span>' +
+        '</div>' +
+        cards +
+      '</div>'
+    );
+  }).join('');
+}
+
+document.getElementById('week-grid').addEventListener('click', (e) => {
+  const card = e.target.closest('.week-task[data-wk-id]');
+  if (!card) return;
+  toggleTask(card.dataset.wkId);
+  renderWeek();
+});
+
+document.getElementById('wk-prev').addEventListener('click', () => { weekOffset--; renderWeek(); });
+document.getElementById('wk-next').addEventListener('click', () => { weekOffset++; renderWeek(); });
+
+function setView(v) {
+  currentView = v;
+  document.getElementById('task-list').style.display  = v === 'list' ? '' : 'none';
+  document.getElementById('week-view').style.display  = v === 'week' ? '' : 'none';
+  document.getElementById('btn-list').classList.toggle('active', v === 'list');
+  document.getElementById('btn-week').classList.toggle('active', v === 'week');
+  if (v === 'week') renderWeek();
+}
+
+document.getElementById('btn-list').addEventListener('click', () => setView('list'));
+document.getElementById('btn-week').addEventListener('click', () => setView('week'));
 
 // ---- first paint ---------------------------------------------------
 render();
