@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Caveat, Patrick_Hand } from "next/font/google";
 import "./globals.css";
 
@@ -19,6 +19,16 @@ const caveat = Caveat({
 export const metadata: Metadata = {
   title: "Task Tracker",
   description: "A hand-drawn task tracker",
+};
+
+// Mobile shell: cover the safe area and lock zoom so the swipe deck
+// and bottom bars behave like a native app.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
