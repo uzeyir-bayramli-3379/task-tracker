@@ -1,65 +1,669 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+/* ===================================================================
+   TASK TRACKER  —  Next.js (App Router) + Supabase.
+
+   Ported from the legacy localStorage app. The data flow is the same
+   "change state -> redraw" loop, except every mutation now also writes
+   to Supabase. We update local React state optimistically so the UI
+   stays as snappy as the original, then persist in the background.
+=================================================================== */
+
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/utils/supabase/client'
+
+// ---- types ---------------------------------------------------------
+type Task = {
+  id: string
+  name: string
+  deadline: string | null // 'YYYY-MM-DD' or null
+  done: boolean
+  completed_at: string | null // ISO timestamp; orders the "completed" list
+}
+
+type Freq = 'daily' | 'weekdays' | 'weekly' | 'monthly'
+
+type Recurring = {
+  id: string
+  name: string
+  freq: Freq
+  weekday: number // 0=Sun .. 6=Sat (only meaningful for 'weekly')
+  last_done: string | null // 'YYYY-MM-DD' or null
+}
+
+// ---- date helpers (pure) ------------------------------------------
+const pad = (n: number) => String(n).padStart(2, '0')
+
+// whole days from today until the deadline (negative = overdue)
+function daysUntil(iso: string | null): number | null {
+  if (!iso) return null
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+  const target = new Date(iso + 'T00:00:00')
+  return Math.round((target.getTime() - now.getTime()) / 86400000)
+}
+
+// friendly ETA like "3 days" or "~2 months"
+function etaText(iso: string | null): string {
+  const d = daysUntil(iso)
+  if (d === null || d < 0) return 'past due date'
+  if (d === 0) return 'today'
+  if (d === 1) return '1 day'
+  if (d < 45) return d + ' days'
+  const months = Math.round(d / 30)
+  return '~' + months + ' month' + (months > 1 ? 's' : '')
+}
+
+// the "due ..." text shown on each task
+function dueText(iso: string | null): string {
+  const d = daysUntil(iso)
+  if (d === null) return ''
+  if (d < 0) return 'overdue ' + Math.abs(d) + 'd'
+  if (d === 0) return 'due today'
+  const dt = new Date(iso + 'T00:00:00')
+  return 'due ' + pad(dt.getDate()) + '/' + pad(dt.getMonth() + 1)
+}
+
+function todayISO(): string {
+  const n = new Date()
+  return n.getFullYear() + '-' + pad(n.getMonth() + 1) + '-' + pad(n.getDate())
+}
+
+const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+
+function isRecDueToday(r: Recurring): boolean {
+  const today = todayISO()
+  const dow = new Date().getDay()
+  if (r.freq === 'daily') return !r.last_done || r.last_done < today
+  if (r.freq === 'weekdays') return dow >= 1 && dow <= 5 && (!r.last_done || r.last_done < today)
+  if (r.freq === 'weekly') return dow === r.weekday && (!r.last_done || r.last_done < today)
+  if (r.freq === 'monthly') {
+    if (!r.last_done) return true
+    const ld = new Date(r.last_done + 'T00:00:00')
+    const td = new Date()
+    return ld.getFullYear() !== td.getFullYear() || ld.getMonth() !== td.getMonth()
+  }
+  return false
+}
+
+function recLabel(r: Recurring): string {
+  return r.freq === 'weekly' ? 'weekly · ' + DAYS[r.weekday].slice(0, 3) : r.freq
+}
+
+// ---- week view helpers --------------------------------------------
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+function getWeekDays(offset: number): Date[] {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const dow = today.getDay()
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + offset * 7)
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday)
+    d.setDate(monday.getDate() + i)
+    return d
+  })
+}
+
+function dayISO(d: Date): string {
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+}
+
+// ---- small SVG icons ----------------------------------------------
+const CheckIcon = ({ color = '#3f8f5b' }: { color?: string }) => (
+  <svg viewBox="0 0 24 24">
+    <path
+      d="M4 13 C 7 16, 9 18, 10 19 C 13 13, 17 7, 21 4"
+      fill="none"
+      stroke={color}
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+const TrashIcon = () => (
+  <svg viewBox="0 0 24 24">
+    <path
+      d="M4 6 H20 M9 6 V4 H15 V6 M6 6 L7 20 H17 L18 6"
+      fill="none"
+      stroke="#2b2b28"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+// ---- custom hand-drawn dropdown -----------------------------------
+function InkDrop({
+  value,
+  options,
+  onChange,
+}: {
+  value: string
+  options: { val: string; label: string }[]
+  onChange: (val: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const current = options.find((o) => o.val === value)
+
+  useEffect(() => {
+    if (!open) return
+    const close = () => setOpen(false)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [open])
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className={'ink-drop' + (open ? ' open' : '')} ref={ref}>
+      <button
+        className="ink-drop-trigger"
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((o) => !o)
+        }}
+      >
+        {current?.label ?? ''} <span className="drop-caret">▾</span>
+      </button>
+      <ul className="ink-drop-menu">
+        {options.map((o) => (
+          <li key={o.val}>
+            <button
+              type="button"
+              className={o.val === value ? 'active' : ''}
+              onClick={() => {
+                onChange(o.val)
+                setOpen(false)
+              }}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+              {o.label}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
-  );
+  )
+}
+
+// ===================================================================
+//  MAIN COMPONENT
+// ===================================================================
+export default function Home() {
+  const router = useRouter()
+  // createBrowserClient is cheap, but keep one stable instance per mount.
+  const [supabase] = useState(() => createClient())
+
+  const [loading, setLoading] = useState(true)
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [recurring, setRecurring] = useState<Recurring[]>([])
+
+  // add-task form
+  const [nameInput, setNameInput] = useState('')
+  const [dateInput, setDateInput] = useState('')
+
+  // per-task delete confirmation (UI-only, not persisted)
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+
+  // recurring form
+  const [recName, setRecName] = useState('')
+  const [recFreq, setRecFreq] = useState<Freq>('daily')
+  const [recWeekday, setRecWeekday] = useState(1)
+
+  // views
+  const [view, setView] = useState<'list' | 'week'>('list')
+  const [weekOffset, setWeekOffset] = useState(0)
+
+  // ---- initial load ------------------------------------------------
+  useEffect(() => {
+    let cancelled = false
+    async function loadAll() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login')
+        return
+      }
+      const [taskRes, recRes] = await Promise.all([
+        supabase.from('tasks').select('*'),
+        supabase.from('recurring').select('*'),
+      ])
+      if (cancelled) return
+      setTasks((taskRes.data as Task[]) ?? [])
+      setRecurring((recRes.data as Recurring[]) ?? [])
+      setLoading(false)
+    }
+    loadAll()
+    return () => {
+      cancelled = true
+    }
+  }, [supabase, router])
+
+  // ---- task actions ------------------------------------------------
+  async function addTask(name: string, deadline: string) {
+    const { data, error } = await supabase
+      .from('tasks')
+      .insert({ name, deadline: deadline || null })
+      .select()
+      .single()
+    if (!error && data) setTasks((ts) => [...ts, data as Task])
+  }
+
+  async function toggleTask(id: string) {
+    const t = tasks.find((t) => t.id === id)
+    if (!t) return
+    const done = !t.done
+    const completed_at = done ? new Date().toISOString() : null
+    // optimistic
+    setTasks((ts) => ts.map((x) => (x.id === id ? { ...x, done, completed_at } : x)))
+    await supabase.from('tasks').update({ done, completed_at }).eq('id', id)
+  }
+
+  async function deleteTask(id: string) {
+    setTasks((ts) => ts.filter((t) => t.id !== id))
+    setConfirmingId((c) => (c === id ? null : c))
+    await supabase.from('tasks').delete().eq('id', id)
+  }
+
+  // ---- recurring actions -------------------------------------------
+  async function addRecurring(name: string, freq: Freq, weekday: number) {
+    const { data, error } = await supabase
+      .from('recurring')
+      .insert({ name, freq, weekday: freq === 'weekly' ? weekday : 0, last_done: null })
+      .select()
+      .single()
+    if (!error && data) setRecurring((rs) => [...rs, data as Recurring])
+  }
+
+  async function tickRecurring(id: string) {
+    const today = todayISO()
+    setRecurring((rs) => rs.map((r) => (r.id === id ? { ...r, last_done: today } : r)))
+    await supabase.from('recurring').update({ last_done: today }).eq('id', id)
+  }
+
+  async function deleteRecurring(id: string) {
+    setRecurring((rs) => rs.filter((r) => r.id !== id))
+    await supabase.from('recurring').delete().eq('id', id)
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut()
+    router.push('/login')
+  }
+
+  // ---- derived lists -----------------------------------------------
+  const active = useMemo(
+    () =>
+      tasks
+        .filter((t) => !t.done)
+        .sort((a, b) => {
+          const da = daysUntil(a.deadline)
+          const db = daysUntil(b.deadline)
+          if (da === null) return db === null ? 0 : 1
+          if (db === null) return -1
+          return da - db
+        }),
+    [tasks]
+  )
+
+  const done = useMemo(
+    () =>
+      tasks
+        .filter((t) => t.done)
+        .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? '')),
+    [tasks]
+  )
+
+  const sortedRec = useMemo(
+    () =>
+      [...recurring].sort((a, b) => {
+        const ad = isRecDueToday(a)
+        const bd = isRecDueToday(b)
+        if (ad !== bd) return ad ? -1 : 1
+        return a.name.localeCompare(b.name)
+      }),
+    [recurring]
+  )
+
+  // ---- handlers ----------------------------------------------------
+  function handleAddTask(e: React.FormEvent) {
+    e.preventDefault()
+    const name = nameInput.trim()
+    if (!name) return
+    addTask(name, dateInput)
+    setNameInput('')
+    setDateInput('')
+  }
+
+  function handleAddRec(e: React.FormEvent) {
+    e.preventDefault()
+    const name = recName.trim()
+    if (!name) return
+    addRecurring(name, recFreq, recWeekday)
+    setRecName('')
+  }
+
+  const etaPreview = dateInput
+    ? 'eta — ' + (etaText(dateInput) || 'past date')
+    : 'eta is calculated from today'
+
+  // ---- task row ----------------------------------------------------
+  // Plain render helper (not a component) so React keeps the JSX inline
+  // with the parent's render — no nested-component state resets.
+  function renderTask(t: Task) {
+    const d = daysUntil(t.deadline)
+    const soon = !t.done && d !== null && d >= 0 && d <= 2
+    const over = !t.done && d !== null && d < 0
+    const eta = t.done ? '' : etaText(t.deadline)
+
+    return (
+      <li className={'task' + (t.done ? ' done' : '')} key={t.id}>
+        <div className="task-body">
+          <span className="task-name">{t.name}</span>
+          <span className="task-meta">
+            {eta ? ' · eta ' + eta : ''}
+            {t.deadline ? (
+              <>
+                {' · '}
+                <span className={'m-due' + (soon ? ' soon' : '') + (over ? ' over' : '')}>
+                  {dueText(t.deadline)}
+                </span>
+              </>
+            ) : null}
+          </span>
+        </div>
+        {t.done && <span className="stamp">COMPLETE</span>}
+        {confirmingId === t.id ? (
+          <div className="confirm-btns">
+            <button className="confirm-no" onClick={() => setConfirmingId(null)}>
+              no
+            </button>
+            <button className="confirm-yes" onClick={() => deleteTask(t.id)}>
+              yes
+            </button>
+          </div>
+        ) : (
+          <button
+            className="trash-btn"
+            title="delete"
+            onClick={() => (t.done ? deleteTask(t.id) : setConfirmingId(t.id))}
+          >
+            <TrashIcon />
+          </button>
+        )}
+        <button
+          className="checkbox sketch"
+          onClick={() => toggleTask(t.id)}
+          style={t.done ? { borderColor: '#3f8f5b' } : undefined}
+        >
+          <svg viewBox="0 0 24 24">{t.done && <CheckIcon />}</svg>
+        </button>
+      </li>
+    )
+  }
+
+  // ---- week grid ---------------------------------------------------
+  function renderWeek() {
+    const days = getWeekDays(weekOffset)
+    const today = todayISO()
+    const first = days[0]
+    const last = days[6]
+    const range =
+      pad(first.getDate()) + '/' + pad(first.getMonth() + 1) +
+      ' – ' +
+      pad(last.getDate()) + '/' + pad(last.getMonth() + 1)
+
+    return (
+      <div className="week-view">
+        <div className="week-nav">
+          <button className="wk-nav-btn" onClick={() => setWeekOffset((w) => w - 1)}>
+            ←
+          </button>
+          <span className="wk-range">{range}</span>
+          <button className="wk-nav-btn" onClick={() => setWeekOffset((w) => w + 1)}>
+            →
+          </button>
+        </div>
+        <div className="week-grid">
+          {days.map((day, i) => {
+            const iso = dayISO(day)
+            const isToday = iso === today
+            const isPast = iso < today
+            const dayTasks = tasks
+              .filter((t) => t.deadline === iso)
+              .sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0))
+            return (
+              <div
+                key={iso}
+                className={'week-day' + (isToday ? ' today' : isPast ? ' past' : '')}
+              >
+                <div className="week-day-hdr">
+                  <span className="wd-name">{DAY_NAMES[i]}</span>
+                  <span className="wd-num">{day.getDate()}</span>
+                </div>
+                {dayTasks.length ? (
+                  dayTasks.map((t) => (
+                    <div
+                      key={t.id}
+                      className={'week-task' + (t.done ? ' done' : '')}
+                      onClick={() => toggleTask(t.id)}
+                    >
+                      {t.name}
+                    </div>
+                  ))
+                ) : (
+                  <span className="week-empty">—</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  // ---- render ------------------------------------------------------
+  return (
+    <div className="stage">
+      <div className="sheet sketch">
+        {/* LEFT: add a task */}
+        <aside className="sidebar">
+          <h1 className="pane-title">new task</h1>
+          <form className="add-form" onSubmit={handleAddTask}>
+            <label className="field">
+              <span className="lbl">what needs doing?</span>
+              <input
+                className="ink-input"
+                placeholder="task name…"
+                autoComplete="off"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span className="lbl">deadline</span>
+              <input
+                className="ink-input"
+                type="date"
+                value={dateInput}
+                onChange={(e) => setDateInput(e.target.value)}
+              />
+              <span className="eta-preview">{etaPreview}</span>
+            </label>
+            <button className="add-btn sketch" type="submit">
+              + add task
+            </button>
+          </form>
+          <p className="hint">
+            tip — tick the box on the right to mark a task done. it&apos;ll drop into
+            &quot;completed&quot; below.
+          </p>
+          <button className="signout" type="button" onClick={signOut}>
+            sign out
+          </button>
+        </aside>
+
+        {/* DIVIDER 1 */}
+        <div className="divider" aria-hidden="true">
+          <svg viewBox="0 0 8 600" preserveAspectRatio="none">
+            <path
+              d="M4 4 C 2 150, 6 300, 3 450 S 5 560, 4 596"
+              fill="none"
+              stroke="#2b2b28"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+            />
+          </svg>
+        </div>
+
+        {/* MIDDLE: task list / week view */}
+        <section className="list-pane">
+          <header className="list-head">
+            <h2 className="pane-title">tasks</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span className="counts">
+                <b>{active.length}</b> active <span className="dot">·</span>{' '}
+                <b style={{ color: '#3f8f5b' }}>{done.length}</b> done
+              </span>
+              <div className="view-toggle">
+                <button
+                  className={'vt-btn' + (view === 'list' ? ' active' : '')}
+                  onClick={() => setView('list')}
+                >
+                  list
+                </button>
+                <button
+                  className={'vt-btn' + (view === 'week' ? ' active' : '')}
+                  onClick={() => setView('week')}
+                >
+                  week
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {loading ? (
+            <div className="loading-note">loading…</div>
+          ) : view === 'list' ? (
+            <ul className="task-list">
+              {tasks.length === 0 ? (
+                <li className="empty">nothing here yet — add a task on the left.</li>
+              ) : (
+                <>
+                  {active.map(renderTask)}
+                  {done.length > 0 && <li className="group-sep">completed</li>}
+                  {done.map(renderTask)}
+                </>
+              )}
+            </ul>
+          ) : (
+            renderWeek()
+          )}
+        </section>
+
+        {/* DIVIDER 2 */}
+        <div className="divider" aria-hidden="true">
+          <svg viewBox="0 0 8 600" preserveAspectRatio="none">
+            <path
+              d="M4 4 C 5 150, 3 300, 5 450 S 3 560, 4 596"
+              fill="none"
+              stroke="#2b2b28"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+            />
+          </svg>
+        </div>
+
+        {/* RIGHT: recurring tasks */}
+        <section className="rec-pane">
+          <h2 className="pane-title">recurring</h2>
+          <form className="rec-form" onSubmit={handleAddRec}>
+            <input
+              className="ink-input"
+              placeholder="habit name…"
+              autoComplete="off"
+              value={recName}
+              onChange={(e) => setRecName(e.target.value)}
+            />
+            <div className="rec-selects">
+              <InkDrop
+                value={recFreq}
+                onChange={(v) => setRecFreq(v as Freq)}
+                options={[
+                  { val: 'daily', label: 'daily' },
+                  { val: 'weekdays', label: 'weekdays' },
+                  { val: 'weekly', label: 'weekly' },
+                  { val: 'monthly', label: 'monthly' },
+                ]}
+              />
+              {recFreq === 'weekly' && (
+                <InkDrop
+                  value={String(recWeekday)}
+                  onChange={(v) => setRecWeekday(parseInt(v, 10))}
+                  options={[
+                    { val: '1', label: 'monday' },
+                    { val: '2', label: 'tuesday' },
+                    { val: '3', label: 'wednesday' },
+                    { val: '4', label: 'thursday' },
+                    { val: '5', label: 'friday' },
+                    { val: '6', label: 'saturday' },
+                    { val: '0', label: 'sunday' },
+                  ]}
+                />
+              )}
+            </div>
+            <button className="add-btn sketch" type="submit" style={{ fontSize: 18, padding: '7px 13px' }}>
+              + add
+            </button>
+          </form>
+          <ul className="rec-list">
+            {loading ? null : recurring.length === 0 ? (
+              <li className="empty" style={{ fontSize: 16 }}>
+                no habits yet.
+              </li>
+            ) : (
+              sortedRec.map((r) => {
+                const due = isRecDueToday(r)
+                const doneToday = r.last_done === todayISO()
+                const badgeClass = due ? 'due' : doneToday ? 'done-t' : 'not-today'
+                const badgeText = due
+                  ? recLabel(r) + ' · due'
+                  : doneToday
+                    ? 'done today'
+                    : recLabel(r)
+                return (
+                  <li className="rec-task" key={r.id}>
+                    <div className="rec-body">
+                      <div className="rec-name">{r.name}</div>
+                      <span className={'rec-badge ' + badgeClass}>{badgeText}</span>
+                    </div>
+                    <button
+                      className="rec-trash"
+                      title="delete"
+                      onClick={() => deleteRecurring(r.id)}
+                    >
+                      <TrashIcon />
+                    </button>
+                    <button
+                      className="rec-tick sketch"
+                      disabled={doneToday}
+                      onClick={() => tickRecurring(r.id)}
+                    >
+                      <svg viewBox="0 0 24 24">{doneToday && <CheckIcon />}</svg>
+                    </button>
+                  </li>
+                )
+              })
+            )}
+          </ul>
+        </section>
+      </div>
+    </div>
+  )
 }
