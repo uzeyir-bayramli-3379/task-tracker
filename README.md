@@ -1,29 +1,51 @@
 # Task Tracker
 
-A task and habit tracker with a hand-drawn, notebook-style interface. Built with Next.js and Supabase — create an account, log in from any device, and your tasks are always in sync.
+A personal task and habit tracker with a hand-drawn, notebook-style interface. Started life as a single vanilla HTML file and grew into a full-stack app with accounts, cloud sync, two responsive layouts, and daily email reminders.
 
 **Live:** https://task-tracker-navy-five-21.vercel.app
 
 ---
 
+## Screenshots
+
+![login](screenshots/login.png) ![main1](screenshots/main1.png) ![main2](screenshots/main2.png) ![mobile1](screenshots/mobile1.png) ![mobile2](screenshots/mobile2.png) ![mobilecal1](screenshots/mobilecal1.png) ![mobilecal2](screenshots/mobilecal2.png)
+
+- **Login** — sticky-note card with a paperclip doodle
+- **Desktop** — three-column layout: add task · task list (list/week toggle) · recurring habits
+- **Mobile** — swipeable tabs: tasks · recurring · calendar, with sticky bottom input bars
+- **Calendar** — month grid with per-day task dots; tap a day or the month header to see what's due
+
+---
+
 ## Features
 
-- **One-off tasks** with optional deadlines. Each task shows a live ETA ("3 days", "~2 months") and flags items that are due soon or overdue.
-- **Smart sorting** — active tasks ordered by nearest deadline; completed tasks drop into a separate section ordered by most recently finished.
-- **Recurring habits** with daily, weekday, weekly (pick a day), and monthly schedules. Each habit knows whether it's due today and can be ticked off once per cycle.
-- **Two views** — a flat task list and a 7-day week grid you can navigate forward and back, with tasks placed on their deadline day.
-- **Delete confirmation** so active tasks aren't removed by accident.
-- **Auth + cloud sync** — tasks and habits are tied to your account and persist across devices and browsers.
-- **Responsive** — the three-pane layout collapses into a single column on narrow screens.
+- **One-off tasks** with optional deadlines — live ETA ("3 days", "~2 months"), due-soon and overdue flags
+- **Smart sorting** — active tasks by nearest deadline; completed tasks by most recently finished
+- **Recurring habits** — daily, weekdays, weekly (pick a day), monthly; resets each cycle and tracks whether it's due today
+- **Desktop views** — flat task list and a navigable 7-day week grid
+- **Mobile calendar** — month grid with a bottom sheet showing a day's tasks, or the whole month at once
+- **Auth** — email/password signup, login, and a full password-reset flow (all via Supabase)
+- **Cloud sync** — tasks tied to your account, available on any device, protected per-user with Row Level Security
+- **Daily email reminders** — a Vercel cron job emails you each morning about tasks due the next day (via Resend)
+- **Responsive** — desktop layout above 900px, swipeable mobile app below, sharing one data layer
 
 ---
 
 ## Tech
 
-- **Next.js 15** (App Router) + **TypeScript**
-- **Supabase** — Postgres database, Auth, Row Level Security
-- **Tailwind CSS** + hand-drawn custom CSS (Caveat & Patrick Hand fonts)
-- **Vercel** for deployment
+- **Next.js 16** (App Router) + **TypeScript**
+- **Supabase** — Postgres, Auth, Row Level Security
+- **Resend** — transactional email for deadline reminders
+- **Vercel** — hosting + cron scheduling
+- **Custom hand-drawn CSS** — Caveat & Patrick Hand fonts, sketch borders, ink/paper palette
+
+---
+
+## Architecture notes
+
+- `app/page.tsx` lifts all Supabase data fetching into shared state, then renders either `DesktopApp` or `MobileApp` based on a `useWindowWidth` check — both UIs run off a single Supabase connection.
+- `proxy.ts` (Next.js middleware) guards every route, redirecting unauthenticated users to `/login`, while explicitly excluding the cron API path.
+- The reminder endpoint uses the Supabase **service role** key (server-only) to read across users, groups due tasks per user, and sends one email each via Resend.
 
 ---
 
@@ -35,11 +57,16 @@ cd task-tracker
 npm install
 ```
 
-Create a `.env.local` file in the root:
+Create a `.env.local` in the root:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+
+# server-only — needed for the reminder cron
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+RESEND_API_KEY=your_resend_key
+CRON_SECRET=any_random_string
 ```
 
 Then:
@@ -53,7 +80,7 @@ npm run dev
 
 ## Database setup
 
-Run the following in your Supabase SQL editor:
+Run once in the Supabase SQL editor:
 
 ```sql
 -- Tasks
@@ -91,6 +118,8 @@ create policy "recurring habits are private to their owner"
   with check (auth.uid() = user_id);
 ```
 
+> **Email reminders note:** Resend's test sender (`onboarding@resend.dev`) only delivers to your own account email. To send to anyone, add a verified domain in Resend and swap the `from` address in `app/api/send-reminders/route.ts`.
+
 ---
 
 ## Project structure
@@ -98,38 +127,42 @@ create policy "recurring habits are private to their owner"
 ```
 task-tracker/
 ├── app/
-│   ├── layout.tsx        # fonts, metadata
-│   ├── page.tsx          # main app (tasks + recurring + week view)
-│   ├── globals.css       # hand-drawn sketch styles
-│   └── login/
-│       └── page.tsx      # auth page (login + signup)
-├── utils/
-│   └── supabase/
-│       ├── client.ts     # browser Supabase client
-│       └── server.ts     # server-side Supabase client
-├── proxy.ts              # auth middleware (route protection)
-├── supabase/
-│   └── schema.sql        # database schema
-└── legacy/
-    └── index.html        # original vanilla HTML version
+│   ├── layout.tsx              # fonts, metadata, viewport
+│   ├── page.tsx                # responsive root — DesktopApp or MobileApp
+│   ├── DesktopApp.tsx          # three-column desktop layout
+│   ├── MobileApp.tsx           # swipeable tab layout
+│   ├── shared.ts               # shared helpers (date utils, etc.)
+│   ├── globals.css             # hand-drawn sketch styles
+│   ├── login/page.tsx          # login + signup + forgot password
+│   ├── reset-password/page.tsx # password reset flow
+│   └── api/
+│       └── send-reminders/
+│           └── route.ts        # daily reminder cron endpoint
+├── utils/supabase/
+│   ├── client.ts               # browser client
+│   └── server.ts               # server-side client
+├── proxy.ts                    # auth middleware (route protection)
+├── vercel.json                 # cron schedule (daily 08:00 UTC)
+├── supabase/schema.sql         # database schema
+└── legacy/index.html           # original vanilla HTML version
 ```
+
+---
+
+## From vanilla HTML to full-stack
+
+This started as one ~930-line `index.html` with `localStorage` persistence (still in `legacy/`). The migration added, in order: Supabase auth + Postgres + RLS, a Next.js App Router rewrite, a redesigned login, a mobile swipe layout, a responsive desktop/mobile split, daily email reminders, and a password-reset flow. Each piece was built and verified before the next — brick by brick.
 
 ---
 
 ## Roadmap
 
-- [ ] Web push notifications for upcoming deadlines
-- [ ] Gmail reminders as fallback
-- [ ] Mobile app (React Native + Expo)
+- [ ] Theme switcher (a second theme + toggle, saved locally)
+- [ ] Sign in with Google
+- [ ] React Native + Expo mobile app
 - [ ] Home screen widget
 - [ ] Edit tasks in place
 - [ ] Tags / categories with filtering
-
----
-
-## Screenshots
-
-![login](image.png) ![main1](<Screenshot 2026-05-30 232221.png>) ![main2](<Screenshot 2026-05-30 232241.png>)
 
 ---
 
