@@ -44,6 +44,7 @@ export default function LoginPage() {
   const [passErr, setPassErr] = useState(false)
   const [authErr, setAuthErr] = useState('')
   const [loading, setLoading] = useState(false)
+  const [resetMsg, setResetMsg] = useState('')
 
   const copy = COPY[mode]
 
@@ -51,11 +52,34 @@ export default function LoginPage() {
     setEmailErr(false)
     setPassErr(false)
     setAuthErr('')
+    setResetMsg('')
   }
 
   function toggleMode() {
     setMode((m) => (m === 'login' ? 'signup' : 'login'))
     clearErrors()
+  }
+
+  async function handleForgot() {
+    clearErrors()
+
+    const emailVal = email.trim()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) {
+      setEmailErr(true)
+      return
+    }
+
+    setLoading(true)
+    const { error } = await supabase.auth.resetPasswordForEmail(emailVal, {
+      redirectTo: 'https://task-tracker-navy-five-21.vercel.app/reset-password',
+    })
+    setLoading(false)
+
+    if (error) {
+      setAuthErr(error.message)
+      return
+    }
+    setResetMsg('check your inbox — we sent a reset link.')
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -151,7 +175,16 @@ export default function LoginPage() {
           </button>
         </form>
 
+        {mode === 'login' && (
+          <p className="auth-switch">
+            <button type="button" onClick={handleForgot} disabled={loading}>
+              forgot password?
+            </button>
+          </p>
+        )}
+
         {authErr && <p className="auth-form-err">{authErr}</p>}
+        {resetMsg && <p className="auth-form-msg">{resetMsg}</p>}
 
         <p className="auth-switch">
           <span>{copy.switchText}</span>{' '}

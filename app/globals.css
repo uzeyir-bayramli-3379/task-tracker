@@ -1118,6 +1118,15 @@ input[type="date"].ink-input { font-size: 17px; color: var(--ink-soft); }
   margin: 14px 0 0;
 }
 
+/* a positive confirmation, e.g. "reset link sent" */
+.auth-form-msg {
+  font-family: var(--font-title);
+  font-size: 18px;
+  color: var(--done);
+  text-align: center;
+  margin: 14px 0 0;
+}
+
 .auth-switch {
   margin: 22px 0 0;
   font-size: 17px;
